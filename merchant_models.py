@@ -12,6 +12,7 @@ if TYPE_CHECKING:
     from ballsdex.core.models import Ball, Player, Special
 
 merchant_items: dict[int, MerchantItem] = {}
+global_shops: dict[int, GlobalShop] = {}
 
 class MerchantSettings(models.Model):
     rotation = fields.BigIntField(description="Duration of the items in minutes. Default to 24 hours.", default=1440)
@@ -99,3 +100,12 @@ class MerchantInstance(models.Model):
         Check if the rotation has ended.
         """
         return self.rotation_ends_at <= tortoise_now()
+
+
+class GlobalShop(models.Model):
+    name = fields.CharField(max_length=64, unique=True)
+    banner = fields.CharField(max_length=200, description="An optional promotional banner for this shop.")
+    items: fields.ManyToManyRelation[MerchantItem] = fields.ManyToManyField(
+        "models.MerchantItem",
+        through="globalshop_items"
+    )

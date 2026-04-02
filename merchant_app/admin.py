@@ -1,7 +1,12 @@
+from typing import TYPE_CHECKING
+
 from django.contrib import admin
 from django.http import HttpRequest
 
-from .models import MerchantSettings, MerchantItem
+from .models import GlobalShop, MerchantSettings, MerchantItem
+
+if TYPE_CHECKING:
+    from django.db.models import QuerySet
 
 @admin.register(MerchantSettings)
 class MerchantSettingsAdmin(admin.ModelAdmin):
@@ -43,3 +48,18 @@ class MerchantItemAdmin(admin.ModelAdmin):
     @admin.display(description="Name of the special")
     def special_name(self, obj: MerchantItem):
         return obj.special.name if obj.special else "-"
+
+
+@admin.register(GlobalShop)
+class GlobalShopAdmin(admin.ModelAdmin):
+    list_display = ("pk", "name", "item_count")
+    search_fields = ("name",)
+    filter_horizontal = ("items",)
+    save_on_top = True
+
+    @admin.display(description="Number of items")
+    def item_count(self, obj: GlobalShop) -> int:
+        return obj.items.count()
+
+    def get_queryset(self, request: "HttpRequest") -> "QuerySet[GlobalShop]":
+        return super().get_queryset(request).prefetch_related("items")

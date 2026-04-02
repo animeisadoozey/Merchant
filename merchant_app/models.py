@@ -48,3 +48,12 @@ class MerchantInstance(models.Model):
     class Meta:
         managed = True
         db_table = "merchantinstance"
+
+class GlobalShop(models.Model):
+    name = models.CharField(max_length=64, unique=True)
+    banner = models.ImageField(null=True, blank=True, help_text="An optional promotional banner for this shop.")
+    items = models.ManyToManyField(MerchantItem, blank=True)
+
+    class Meta:
+        managed = True
+        db_table = "globalshop"

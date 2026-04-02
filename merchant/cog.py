@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 import discord
 from discord import app_commands
 from discord.ext import commands
+from discord.utils import format_dt
 from packaging.version import parse as parse_version
 from tortoise.exceptions import BaseORMException, DoesNotExist
 from tortoise.timezone import now as tortoise_now
@@ -15,14 +16,19 @@ from tortoise.timezone import now as tortoise_now
 from ballsdex import __version__ as ballsdex_version
 from ballsdex.core.currency_models import CurrencySettings, MoneyInstance
 from ballsdex.core.merchant_models import (
+    GlobalShop,
     MerchantInstance,
     MerchantItem,
     MerchantSettings,
     merchant_items,
+    global_shops,
 )
 from ballsdex.core.models import Ball, BallInstance, Player
 from ballsdex.core.utils.buttons import ConfirmChoiceView
 from ballsdex.core.utils.paginator import FieldPageSource, Pages
+from .transformers import GlobalShopTransform
+from .components import BuyItemView
+
 from ballsdex.settings import settings
 
 if TYPE_CHECKING:
@@ -58,7 +64,10 @@ class Merchant(commands.GroupCog):
         self.bot = bot
         self._currency_settings: CurrencySettings | None = None
         self._merchant_settings: MerchantSettings | None = None
-    
+
+    rotation = app_commands.Group(name="rotation", description="Merchant rotation commands.")
+    global_group = app_commands.Group(name="global", description="Merchant global commands.")
+
     @commands.group(invoke_without_command=True)
     async def merchant(self, ctx: commands.Context):
         """
@@ -76,12 +85,16 @@ class Merchant(commands.GroupCog):
         for merchant in await MerchantItem.all():
             merchant_items[merchant.pk] = merchant
         
+        global_shops.clear()
+        for shop in await GlobalShop.all():
+            global_shops[shop.pk] = shop
+
         await ctx.message.add_reaction("✅")
     
-    @app_commands.command()
-    async def shop(self, interaction: discord.Interaction["BallsDexBot"]):
+    @rotation.command(name="shop")
+    async def rotation_shop(self, interaction: discord.Interaction["BallsDexBot"]):
         """
-        Check the available items in the shop.
+        Check the available items in the rotation shop.
         """
         await interaction.response.defer(thinking=True, ephemeral=True)
         player, _ = await Player.get_or_create(discord_id=interaction.user.id)
@@ -108,19 +121,23 @@ class Merchant(commands.GroupCog):
         else:
             items = instance.items
         
-        entries: list[tuple[str, str]] = [(x.name, await self.format_price(x.prize)) for x in items]
+        entries: list[tuple[str, str]] = [(x.name, await self.format_price(x.prize)) for x in items if x.enabled]
         source = FieldPageSource(entries, per_page=merchant_settings.items, inline=True, clear_description=False)
         source.embed.title = f"{settings.bot_name} shop"
-        source.embed.description = "Check out your items!\n-# Note: your items are different from other players"
+        source.embed.description = (
+            "Check out your items! Your rotation will update "
+            f"Your rotation will update {format_dt(instance.rotation_ends_at)}"
+            "\n-# Note: your items are different from other players"
+        )
 
         pages = Pages(source, interaction=interaction, compact=True)
         await pages.start()
     
-    @app_commands.command()
+    @rotation.command()
     @app_commands.rename(item_id="item")
     async def buy(self, interaction: discord.Interaction["BallsDexBot"], item_id: int):
         """
-        Buy an item from the shop.
+        Buy an item from the rotation shop.
 
         Parameters
         ----------
@@ -205,7 +222,45 @@ class Merchant(commands.GroupCog):
                 f"{instance.description(include_emoji=True, bot=self.bot)}"
             )
             return
-    
+
+    @global_group.command(name="shop")
+    async def global_shop(self, interaction: discord.Interaction["BallsDexBot"], shop: GlobalShopTransform):
+        """
+        Check the available items from a global shop.
+
+        Parameters
+        ----------
+        shop: GlobalShop
+            The shop you want to visit
+        """
+        await interaction.response.defer(thinking=True)
+        await shop.fetch_related("items")
+
+        items = await shop.items.all()
+        entries: list[tuple[str, str]] = [(x.name, await self.format_price(x.prize)) for x in items if x.enabled]
+        source = FieldPageSource(entries, per_page=3, inline=True)
+        source.embed.title = f"{settings.bot_name} {shop.name}"
+        pages = Pages(source, interaction=interaction, compact=True)
+        await pages.start()
+
+    @global_group.command(name="buy")
+    async def global_buy(self, interaction: discord.Interaction["BallsDexBot"], shop: GlobalShopTransform):
+        """
+        Buy an item from a global shop.
+
+        Parameters
+        ----------
+        shop: GlobalShop
+            The shop that you want to buy items
+        """
+        items = [x for x in await shop.items.all() if x.enabled]
+        if not items:
+            await interaction.response.send_message(f"{shop.name} doesn't any active items.", ephemeral=True)
+            return
+
+        paginator = BuyItemView(interaction, shop, items)
+        await paginator.start(ephemeral=True)
+
     @app_commands.command()
     async def convert_token(
         self, 

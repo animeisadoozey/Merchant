@@ -3,4 +3,4 @@ token_ball_name = "Pengu"
 
 # Coins received for each token converted when using /merchant convert_token
 # Example: 1 token = 100 coins
-token_conversion_rate = 1500
+token_conversion_rate = 3000
